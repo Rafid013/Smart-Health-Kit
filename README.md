@@ -1,1 +1,1 @@
-# Smart-Health-Kit
+# Smart Health Kit
