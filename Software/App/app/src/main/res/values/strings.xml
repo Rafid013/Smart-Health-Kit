@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Smart Health Kit</string>
+    <string name="title_activity_home">HomeActivity</string>
+</resources>
