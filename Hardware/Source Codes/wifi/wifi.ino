@@ -1,7 +1,7 @@
 #include <ESP8266HTTPClient.h>
-
 #include <ThingSpeak.h>
 #include <ESP8266WiFi.h>
+#include "json_parse.h"
 
 const char *ssid =  "Rafid-Hamiz";
 const char *pass =  "32636869";
@@ -27,27 +27,28 @@ void setup() {
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
 
-  /*while(!client.connect(server, 80)) {
-    Serial.println("Trying to connect to ThingSpeak");
-  }
-  Serial.println("Connected to ThingSpeak");*/
 
   ThingSpeak.begin( client );
 
-   /*HTTPClient http;    //Declare object of class HTTPClient
- 
-   http.begin("http://api.thingspeak.com/channels.json");      //Specify request destination
-   http.addHeader("Content-Type", "application/x-www-form-urlencoded");  //Specify content-type header
-   String body = "api_key=ZXPNI4ECJRXG21TI&field1=temperature&field2=blood_pressure&field3=heart_rate&public_flag=true";
-   int httpCode = http.POST(body); 
-   String payload = http.getString();                  //Get the response payload
- 
-   Serial.println(httpCode);   //Print HTTP return code
-   Serial.println(payload);    //Print request response payload
- 
-   http.end();  //Close connection*/
+  HTTPClient http;    //Declare object of class HTTPClient
 
-   write2TSData( 490416, 1, 10, 2, 20, 3, 30);
+  http.begin("http://api.thingspeak.com/channels.json");      //Specify request destination
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");  //Specify content-type header
+  String body = "api_key=ZXPNI4ECJRXG21TI&field1=temperature&field2=blood_pressure&field3=heart_rate";
+  int httpCode = http.POST(body); 
+  String payload = http.getString();                  //Get the response payload
+
+  Serial.println(httpCode);   //Print HTTP return code
+  Serial.println(payload);    //Print request response payload
+
+  http.end();  //Close connection
+
+  Serial.println(get_id(payload));
+  Serial.println(get_write_api(payload));
+  Serial.println(get_read_api(payload));
+ 
+
+ //write2TSData( 490416, 1, 10, 2, 20, 3, 30);
 }
 
 void loop() {
