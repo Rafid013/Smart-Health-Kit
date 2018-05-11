@@ -54,11 +54,39 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  while (NodeMCU.available() > 0) {
-    String msg = NodeMCU.readString();
+  if (NodeMCU.available() >= 37) {
+    Serial.println(NodeMCU.available());
+    int availableByteCount = NodeMCU.available();
+    String msg = "";
+    int i;
+    for ( i = 0; i < 38; i++)
+    {
+      char msgChar = NodeMCU.read();
+      msg += msgChar;
+      Serial.println(msg);
+      Serial.println(NodeMCU.available());
+    }
     msg.replace("\n", " ");
     msg.trim();
-    if (msg.compareTo("0") == 0) {
+    Serial.println(msg);
+    String command, id, key, value;
+    int indexUnderScore = msg.indexOf("_");
+    if (indexUnderScore != -1) {
+      int lastUnderScore = msg.lastIndexOf("_");
+      int colonIndex = msg.indexOf(":");
+      command = msg.substring(0, indexUnderScore);
+      Serial.println(command);
+      id = msg.substring(indexUnderScore + 1, lastUnderScore);
+      Serial.println(id);
+      key = msg.substring(lastUnderScore + 1, colonIndex);
+      Serial.println(key);
+      value = msg.substring(colonIndex + 1);
+      Serial.println(value);
+    }
+    else {
+      command = msg;
+    }
+    if (command.compareTo("0") == 0) {
       open_channel();
       NodeMCU.println(String(id_global) + "_" + read_api_global + "_" + write_api_global);
       NodeMCU.flush();
@@ -67,71 +95,19 @@ void loop() {
       Serial.println(read_api_global);
       Serial.println(write_api_global);
     }
-  }
-  /*while (NodeMCU.available() > 0) {
-    msg_from_arduino = NodeMCU.parseInt();
-    if (NodeMCU.read() == '\n') {
-      if (msg_from_arduino == 0) {
-        //clear_eeprom();
-        open_channel();
-
-        NodeMCU.println(id_global);
-        //NodeMCU.println("\n");
-        NodeMCU.flush();
-
-        NodeMCU.println(read_api_global);
-        //NodeMCU.println("\n");
-        NodeMCU.flush();
-
-
-        Serial.println(id_global);
-        Serial.println(read_api_global);
-        Serial.println(write_api_global);
-      }
-      else if (msg_from_arduino == 1) {
-        temp = Serial.parseFloat();
-        if (NodeMCU.read() == '\n') {
-          if (temp != -1) {
-            Serial.println(temp);
-            ThingSpeak.writeField(id_global, 2, temp, write_api_global);
-          }
-        }
-        bpm = NodeMCU.parseInt();
-        if (NodeMCU.read() == '\n') {
-          if (bpm != -1) {
-            Serial.println(bpm);
-            ThingSpeak.writeField(id_global, 3, bpm, write_api_global);
-          }
-        }
-
-        sys_bp = Serial.parseInt();
-        if (sys_bp != -1) {
-          Serial.println(sys_bp);
-          if (NodeMCU.read() == '\n') {
-            dias_bp = Serial.parseInt();
-            if (NodeMCU.read() == '\n') {
-              String bp(sys_bp + "/" + dias_bp);
-              ThingSpeak.writeField(id_global, 2, bp, write_api_global);
-            }
-          }
-        }
-      }
-      else if (msg_from_arduino == 4) {
-        //String id_to_send =  "" + id_global;
-
-        NodeMCU.print(id_global);
-        NodeMCU.println("\n");
-        NodeMCU.flush();
-
-        Serial.println(id_global);
-        Serial.println(read_api_global);
-
-        NodeMCU.print(read_api_global);
-        NodeMCU.println("\n");
-        NodeMCU.flush();
-      }
+    else if (command.compareTo("1") == 0) {
+      ThingSpeak.writeField(id.toInt(), 1, value, key.c_str());
     }
-    }*/
+    else if (command.compareTo("2") == 0) {
+      int indexSlash = value.indexOf("/");
+      ThingSpeak.setField(2, value.substring(indexSlash + 1));
+      ThingSpeak.setField(3, value.substring(0, indexSlash));
+      ThingSpeak.writeFields(id.toInt(), key.c_str());
+      //ThingSpeak.writeField(id.toInt(), 2, value.substring(indexSlash + 1), key.c_str());
+      //delay(5000);
+      //ThingSpeak.writeField(id.toInt(), 3, value.substring(0, indexSlash), key.c_str());
+    }
+  }
 }
 
 

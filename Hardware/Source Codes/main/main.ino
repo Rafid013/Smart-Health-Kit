@@ -1,5 +1,6 @@
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
+#include "PPG.h"
 
 
 
@@ -12,6 +13,8 @@ const int switchInput3 = 13;
 const int switchInput2 = 11;
 const int switchInput1 = 10;
 
+unsigned long bp_loop = millis();
+
 
 volatile const int switchInterrupt = 19;
 volatile unsigned long lastInterrupt = 0;
@@ -19,12 +22,11 @@ volatile unsigned long lastInterrupt = 0;
 bool channel_created = false;
 bool api_saved = false;
 
-bool temp_value_valid = true;
-bool heart_rate_value_valid = true;
+bool data_saved = false;
+
+bool firstTempReading = true;
 
 float temperatures[10];
-int heart_rate;
-int sys_bp, dias_bp;
 
 String id_global;
 String read_api_global;
@@ -33,40 +35,6 @@ String write_api_global;
 
 volatile int work_mode; //0 = temp, 1 = heart and blood, 2 = clear_eep, 3 = save, 4 = show api
 volatile int prev_work_mode = -1;
-
-/******************************************************************/
-//Heart Rate related variables
-
-//  Variables
-int pulsePin = A2;                 // Pulse Sensor purple wire connected to analog pin 0
-int blinkPin = 49;                // pin to blink led at each beat
-int fadePin = 12;                  // pin to do fancy classy fading blink at each beat
-int fadeRate = 0;                 // used to fade LED on with PWM on fadePin
-
-
-
-// Volatile Variables, used in the interrupt service routine!
-volatile int BPM;                   // int that holds raw Analog in 0. updated every 2mS
-volatile int Signal;                // holds the incoming raw data
-volatile int IBI = 600;             // int that holds the time interval between beats! Must be seeded!
-volatile boolean Pulse = false;     // "True" when User's live heartbeat is detected. "False" when not a "live beat".
-volatile boolean QS = false;        // becomes true when Arduoino finds a beat.
-
-// Regards Serial OutPut  -- Set This Up to your needs
-static boolean serialVisual = true;   // Set to 'false' by Default.  Re-set to 'true' to see Arduino Serial Monitor ASCII Visual Pulse
-
-volatile int rate[10];                      // array to hold last ten IBI values
-volatile unsigned long sampleCounter = 0;          // used to determine pulse timing
-volatile unsigned long lastBeatTime = 0;           // used to find IBI
-volatile int P = 512;                      // used to find peak in pulse wave, seeded
-volatile int T = 512;                     // used to find trough in pulse wave, seeded
-volatile int thresh = 525;                // used to find instant moment of heart beat, seeded
-volatile int amp = 100;                   // used to hold amplitude of pulse waveform, seeded
-volatile boolean firstBeat = true;        // used to seed rate array so we startup with reasonable BPM
-volatile boolean secondBeat = false;      // used to seed rate array so we startup with reasonable BPM
-
-/******************************************************************/
-
 
 /******************************************************************/
 //Temperature related variables
@@ -96,33 +64,7 @@ void setup() {
 
   pinMode(tempSensor, INPUT); // Configuring pin A1 as input
 
-
-
-  pinMode(blinkPin, OUTPUT);        // pin that will blink to your heartbeat!
-  pinMode(fadePin, OUTPUT);         // pin that will fade to your heartbeat!
-  interruptSetup();                 // sets up to read Pulse Sensor signal every 2mS
-  // IF YOU ARE POWERING The Pulse Sensor AT VOLTAGE LESS THAN THE BOARD VOLTAGE,
-  // UN-COMMENT THE NEXT LINE AND APPLY THAT VOLTAGE TO THE A-REF PIN
-  //   analogReference(EXTERNAL);
-  /*if (digitalRead(switchInput3) == 1) {
-    work_mode = 4;
-    Serial.println("SHOW API KEY");
-    }
-    else if (digitalRead(switchInput1) == 0 && digitalRead(switchInput2) == 0) {
-    work_mode = 0;
-    Serial.println("TEMPERATURE");
-    temp_value_valid = true;
-    }
-    else if (digitalRead(switchInput1) == 0 && digitalRead(switchInput2) == 1) {
-    work_mode = 1;
-    Serial.println("HEART RATE AND BLOOD PRESSURE");
-    TIMSK2 = 0x02;     // ENABLE INTERRUPT ON MATCH BETWEEN TIMER2 AND OCR2A
-    heart_rate_value_valid = true;
-    }
-    else {
-    work_mode = 4;
-    Serial.println("SHOW API KEY");
-    }*/
+  ppg_setup();
 
   work_mode = 4;
   Serial.println("SHOW API KEY");
@@ -134,20 +76,26 @@ void loop() {
     calculate_temp();
   }
   else if (work_mode == 1) {
-    if (QS == true) { // A Heartbeat Was Found
-      // BPM and IBI have been Determined
-      // Quantified Self "QS" true when arduino finds a heartbeat
-      fadeRate = 255; // Makes the LED Fade Effect Happen, Set 'fadeRate' Variable to 255 to fade LED with pulse
-      serialOutputWhenBeatHappens(); // A Beat Happened, Output that to serial.
-      QS = false; // reset the Quantified Self flag for next time
+    if (millis() - bp_loop < 30000) {
+      ppg_operation();
     }
-
-    ledFadeToBeat(); // Makes the LED Fade Effect Happen
-    delay(20); //  take a break
+    else {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("BPM: " + String((int)newBPMValue));
+      lcd.setCursor(0, 1);
+      String bp = "SBP/DBP: " + String(SBP) + "/" + String(DBP);
+      lcd.print(bp);
+      delay(1000);
+    }
   }
   else if (work_mode == 2) {
     if (!channel_created) {
-      Serial3.println("0");
+      String msg_to_send = "0";
+      while (msg_to_send.length() != 37) {
+        msg_to_send += " ";
+      }
+      Serial3.println(msg_to_send);
       Serial3.flush();
 
       while (Serial3.available() <= 0);
@@ -176,97 +124,49 @@ void loop() {
     }
   }
   else if (work_mode == 3) {
-    /*Serial3.print(1);
-      Serial3.println("\n");
-      Serial3.flush();
-      if (temp_value_valid) {
-      /*float avgTemp = temperatures[0];
-        for(int i = 1; i < 10; ++i) {
-        avgTemp += temperatures[i];
+    if (!data_saved && api_saved) {
+      if (prev_work_mode == 0) {
+        float avgTemp = 0;
+        for (int i = 0; i < 10; ++i) {
+          avgTemp += temperatures[i];
         }
-        avgTemp /= 10;*/
-
-    /*Serial3.print(300);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      temp_value_valid = false;
+        avgTemp /= 10;
+        String msg_to_send = "1_" + id_global + "_" + write_api_global + ":" + avgTemp;
+        while (msg_to_send.length() != 37) {
+          msg_to_send += " ";
+        }
+        Serial3.println(msg_to_send);
+        Serial3.flush();
       }
-      else {
-      Serial3.print(-1);
-      Serial3.println("\n");
-      Serial3.flush();
+      else if (prev_work_mode == 1) {
+        String msg_to_send = "2_" + id_global + "_" + write_api_global + ":" + (int)newBPMValue + "/" + SBP + "/" + DBP;
+        while (msg_to_send.length() != 37) {
+          msg_to_send += " ";
+        }
+        Serial3.println(msg_to_send);
+        Serial3.flush();
       }
-      if (heart_rate_value_valid) {
-      //Serial3.print(heart_rate);
-      Serial3.print(400);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      //Serial3.print(sys_bp);
-      Serial3.print(130);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      //Serial3.print(dias_bp);
-      Serial3.print(80);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      heart_rate_value_valid = false;
-      }
-      else {
-      Serial3.print(-1);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      Serial3.print(-1);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      Serial3.print(-1);
-      Serial3.println("\n");
-      Serial3.flush();
-      }*/
+      data_saved = true;
+    }
   }
   else {
-    /*if(!api_saved) {
-      api_saved = true;
-      Serial3.print(4);
-      Serial3.println("\n");
-      Serial3.flush();
-
-      id_global = Serial3.readString();
-      id_global.remove(id_global.length() - 1, 2);
-
-      if(Serial3.read() == '\n') {
-         read_api_global = Serial3.readString();
-         if(Serial3.read() == '\n') return;
-      }
-      read_api_global.remove(read_api_global.length() - 1);
-      Serial.println(id_global);
-      Serial.println(read_api_global);
-      }
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.println(id_global);
-      lcd.setCursor(0, 1);
-      lcd.println(read_api_global);
-      delay(1000);*/
     if (api_saved) {
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.println(id_global);
+      lcd.print(id_global);
       lcd.setCursor(0, 1);
-      lcd.println(read_api_global);
+      lcd.print(read_api_global);
     }
     else {
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.println("CREATE A NEW");
+      lcd.print("CREATE A NEW");
       lcd.setCursor(0, 1);
-      lcd.println("CHANNEL");
+      lcd.print("CHANNEL");
+
+      Serial.println("CREATE A NEW CHANNEL");
     }
+    delay(1000);
   }
 }
 
@@ -287,13 +187,18 @@ void switch_data_arrival_ISR() {
     else if (digitalRead(switchInput2) == 0 && digitalRead(switchInput1) == 0) {
       work_mode = 0;
       Serial.println("TEMPERATURE");
-      temp_value_valid = true;
     }
     else if (digitalRead(switchInput2) == 0 && digitalRead(switchInput1) == 1) {
       work_mode = 1;
-      Serial.println("HEART RATE AND BLOOD PRESSURE"); //turn on timer INT for heart rate
-      TIMSK2 = 0x02;
-      heart_rate_value_valid = true;
+      Serial.println("HEART RATE AND BLOOD PRESSURE");
+      Serial.flush();
+      firstPTT = false;
+      firstBPM = false;
+      bp_loop = millis();
+
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Calculating...");
     }
     else if (digitalRead(switchInput2) == 1 && digitalRead(switchInput1) == 0) {
       work_mode = 2;
@@ -304,6 +209,7 @@ void switch_data_arrival_ISR() {
       work_mode = 3;
       Serial.println("SAVE");
       Serial.flush();
+      data_saved = false;
     }
     lastInterrupt = millis();
     //attachInterrupt(digitalPinToInterrupt(switchInterrupt), switch_data_arrival_ISR, RISING);
@@ -323,6 +229,19 @@ void calculate_temp() {
   tempc = voutTemp; // Storing value in Degree Celsius
   tempf = (voutTemp * 1.8) + 32; // Converting to Fahrenheit
 
+  if (firstTempReading) {
+    for (int i = 0; i < 10; ++i) {
+      temperatures[i] = tempc;
+    }
+    firstTempReading = false;
+  }
+  else {
+    for (int i = 0; i < 9; ++i) {
+      temperatures[i] = temperatures[i + 1];
+    }
+    temperatures[9] = tempc;
+  }
+
   lcd.clear();
   lcd.print("Temp = ");
   lcd.print(tempc);
@@ -332,147 +251,6 @@ void calculate_temp() {
 
 
 
-
-void ledFadeToBeat()
-{
-  fadeRate -= 15;                         //  set LED fade value
-  fadeRate = constrain(fadeRate, 0, 255);   //  keep LED fade value from going into negative numbers!
-  analogWrite(fadePin, fadeRate);         //  fade LED
-}
-
-void interruptSetup()
-{
-  // Initializes Timer2 to throw an interrupt every 2mS.
-  TCCR2A = 0x02;     // DISABLE PWM ON DIGITAL PINS 3 AND 11, AND GO INTO CTC MODE
-  //TCCR2B = 0x06;     // DON'T FORCE COMPARE, 256 PRESCALER
-  TCCR2B = 0x05;      //test value
-  OCR2A = 0X7C;      // SET THE TOP OF THE COUNT TO 124 FOR 500Hz SAMPLE RATE
-  sei();             // MAKE SURE GLOBAL INTERRUPTS ARE ENABLED
-}
-
-
-void serialOutputWhenBeatHappens()
-{
-  if (serialVisual == true) //  Code to Make the Serial Monitor Visualizer Work
-  {
-    Serial.print("*** Heart-Beat Happened *** ");  //ASCII Art Madness
-    Serial.print("BPM: ");
-    Serial.println(BPM);
-    lcd.clear();
-    lcd.print("BPM: ");
-    lcd.print(BPM);
-  }
-  else
-  {
-    sendDataToSerial('B', BPM);  // send heart rate with a 'B' prefix
-    sendDataToSerial('Q', IBI);  // send time between beats with a 'Q' prefix
-  }
-}
-
-void sendDataToSerial(char symbol, int data )
-{
-  Serial.print(symbol);
-  Serial.println(data);
-}
-
-ISR(TIMER2_COMPA_vect) //triggered when Timer2 counts to 124
-{
-  cli();                                      // disable interrupts while we do this
-  Signal = analogRead(pulsePin);              // read the Pulse Sensor
-  sampleCounter += 1;                         // keep track of the time in mS with this variable
-  int N = sampleCounter - lastBeatTime;       // monitor the time since the last beat to avoid noise
-  //  find the peak and trough of the pulse wave
-  if (Signal < thresh && N > (IBI / 5) * 3) // avoid dichrotic noise by waiting 3/5 of last IBI
-  {
-    if (Signal < T) // T is the trough
-    {
-      T = Signal; // keep track of lowest point in pulse wave
-    }
-  }
-
-  if (Signal > thresh && Signal > P)
-  { // thresh condition helps avoid noise
-    P = Signal;                             // P is the peak
-  }                                        // keep track of highest point in pulse wave
-
-  //  NOW IT'S TIME TO LOOK FOR THE HEART BEAT
-  // signal surges up in value every time there is a pulse
-  if (N > 500)
-  { // avoid high frequency noise
-    if ( (Signal > thresh) && (Pulse == false) && (N > (IBI / 5) * 3) )
-    {
-      Pulse = true;                               // set the Pulse flag when we think there is a pulse
-      digitalWrite(blinkPin, HIGH);                // turn on pin 13 LED
-      IBI = sampleCounter - lastBeatTime;         // measure time between beats in mS
-      lastBeatTime = sampleCounter;               // keep track of time for next pulse
-
-      if (secondBeat)
-      { // if this is the second beat, if secondBeat == TRUE
-        secondBeat = false;                  // clear secondBeat flag
-        for (int i = 0; i <= 9; i++) // seed the running total to get a realisitic BPM at startup
-        {
-          rate[i] = IBI;
-        }
-      }
-
-      if (firstBeat) // if it's the first time we found a beat, if firstBeat == TRUE
-      {
-        firstBeat = false;                   // clear firstBeat flag
-        secondBeat = true;                   // set the second beat flag
-        sei();                               // enable interrupts again
-        return;                              // IBI value is unreliable so discard it
-      }
-      // keep a running total of the last 10 IBI values
-      word runningTotal = 0;                  // clear the runningTotal variable
-
-      if (N <= 1000) {
-        for (int i = 0; i <= 8; i++)
-        { // shift data in the rate array
-          rate[i] = rate[i + 1];                // and drop the oldest IBI value
-          runningTotal += rate[i];              // add up the 9 oldest IBI values
-        }
-
-        rate[9] = IBI; // add the latest IBI to the rate array
-        runningTotal += rate[9];                // add the latest IBI to runningTotal
-      }
-      else {
-        for (int i = 0; i <= 8; i++)
-        {
-          runningTotal += rate[i];              // add up the 9 oldest IBI values
-        }
-      }
-      runningTotal /= 10;                     // average the last 10 IBI values
-      BPM = 60000 / runningTotal;             // how many beats can fit into a minute? that's BPM!
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print(BPM);
-      QS = true;                              // set Quantified Self flag
-      // QS FLAG IS NOT CLEARED INSIDE THIS ISR
-    }
-  }
-
-  if (Signal < thresh && Pulse == true)
-  { // when the values are going down, the beat is over
-    digitalWrite(blinkPin, LOW);           // turn off pin 13 LED
-    Pulse = false;                         // reset the Pulse flag so we can do it again
-    amp = P - T;                           // get amplitude of the pulse wave
-    thresh = amp / 2 + T;                  // set thresh at 50% of the amplitude
-    P = thresh;                            // reset these for next time
-    T = thresh;
-  }
-
-  if (N > 2500)
-  { // if 2.5 seconds go by without a beat
-    thresh = 512;                          // set thresh default
-    P = 512;                               // set P default
-    T = 512;                               // set T default
-    lastBeatTime = sampleCounter;          // bring the lastBeatTime up to date
-    firstBeat = true;                      // set these to avoid noise
-    secondBeat = false;                    // when we get the heartbeat back
-  }
-
-  sei();                                   // enable interrupts when youre done!
-}// end isr
 
 
 void saveInEEPROM() {
