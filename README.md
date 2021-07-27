@@ -7,4 +7,5 @@
   1. ThingSpeak was used for storing heart rate and blood pressure of users 
   2. An android app was developed so that users can check their previous heart rates and blood pressures                             (data was retrieved from ThingSpeak)
 
+# Click the image below to watch the project video
 [![IMAGE ALT TEXT](http://img.youtube.com/vi/Nbdkxt4p5DI/0.jpg)](http://www.youtube.com/watch?v=Nbdkxt4p5DI "Smart Health Kit")
